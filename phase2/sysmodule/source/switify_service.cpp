@@ -4,6 +4,7 @@
 #include "switify/ipc_protocol.h"
 #include "switify/spectrum_analyzer.hpp"
 #include "NXConsoleLog.h"
+#include "game_volume.hpp"
 
 #include <cstring>
 #include <new>
@@ -108,6 +109,17 @@ Result handle(void*, const SwitifyIpcServerRequest* request, uint8_t* output,
         return controlResult(SwitifyControlResult_BackendUnavailable);
       return writeOutput(output, outputSize, levels);
     }
+    case SwitifyIpcCommand_SetGameVolume: {
+      uint32_t permille = 0;
+      if (!readU32(request, permille) || permille > 1000)
+        return controlResult(SwitifyControlResult_InvalidArgument);
+      game_volume::set(permille);
+      return 0;
+    }
+    case SwitifyIpcCommand_GetGameVolume: {
+      const uint32_t permille = game_volume::get();
+      return writeOutput(output, outputSize, permille);
+    }
     case SwitifyIpcCommand_GetBrowseHeader: {
       const SwitifyIpcBrowseHeader header = serviceCore->browseHeader();
       return writeOutput(output, outputSize, header);
@@ -137,7 +149,8 @@ Result handle(void*, const SwitifyIpcServerRequest* request, uint8_t* output,
       command == SwitifyIpcCommand_Seek ||
       command == SwitifyIpcCommand_SetShuffle ||
       command == SwitifyIpcCommand_SetRepeatMode ||
-      command == SwitifyIpcCommand_SetAudioQuality) {
+      command == SwitifyIpcCommand_SetAudioQuality ||
+      command == SwitifyIpcCommand_AdoptSession) {
     if (!readU32(request, value))
       return controlResult(SwitifyControlResult_InvalidArgument);
   }

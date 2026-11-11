@@ -1,5 +1,6 @@
 #pragma once
 
+#include "connect_dealer.hpp"
 #include "spotify_engine.hpp"
 #include "switify/service_core.hpp"
 
@@ -25,6 +26,7 @@ class BackgroundBackend {
   void run();
   void process(const ControlMessage& message);
   void publishSnapshot();
+  ConnectDealer dealer{SpotifyEngine::instance()};  // Spotify Connect, as phones see it now
   void publishArtworkUrl(const std::string& url);
   void pollPendingReload();
   void armReload();

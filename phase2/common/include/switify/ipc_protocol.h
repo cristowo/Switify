@@ -54,6 +54,13 @@ typedef enum SwitifyIpcCommand {
     SwitifyIpcCommand_GetAudioLevels = 38,
     // Once there is internet again, start the current song afresh at its position.
     SwitifyIpcCommand_ReloadCurrent = 39,
+    // The running game's own volume, permille (1000: as it is), so music can
+    // play over a quieter game. Not in official builds.
+    SwitifyIpcCommand_SetGameVolume = 40,
+    SwitifyIpcCommand_GetGameVolume = 41,
+    // The app played and saved its session: play on from it (value 1) or
+    // just take it, paused (0). Not in official builds.
+    SwitifyIpcCommand_AdoptSession = 42,
 } SwitifyIpcCommand;
 
 typedef enum SwitifyIpcCapability {

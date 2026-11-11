@@ -1290,6 +1290,24 @@ class MainGui final : public tsl::Gui {
     auto* list = new tsl::elm::List();
     player = new PlayerElement();
     list->addItem(player, PlayerElement::Height);
+    // The game's own volume, so the music can play over a quieter game (the
+    // service turns the running game down; 100 % gives it back).
+    gameVolume = new tsl::elm::TrackBar("", false, false, true, "Game volume", "%");
+    uint32_t permille = 1000;
+    if (connectionState == ConnectionState::Connected &&
+        R_FAILED(switifyIpcGetGameVolume(&permille)))
+      permille = 1000;
+    gameVolume->setProgress(static_cast<u16>(permille / 10));
+    gameVolume->setValueChangedListener([](u16 value) {
+      if (connectionState != ConnectionState::Connected) {
+        feedbackText = "Switify's service isn't running";
+        return;
+      }
+      const Result result =
+          switifyIpcSetGameVolume(static_cast<uint32_t>(std::min<u16>(value, 100)) * 10u);
+      feedbackText = R_SUCCEEDED(result) ? "Game volume changed" : resultText(result);
+    });
+    list->addItem(gameVolume);
     list->addItem(new tsl::elm::CategoryHeader("Browse Spotify"));
     list->addItem(actionItem("Home", "For you", [] {
       openBrowser(switifyIpcBrowseHome);
@@ -1333,6 +1351,7 @@ class MainGui final : public tsl::Gui {
 
  private:
   PlayerElement* player = nullptr;
+  tsl::elm::TrackBar* gameVolume = nullptr;
   tsl::elm::ListItem* settingsItem = nullptr;
   std::chrono::steady_clock::time_point nextRefresh{};
 };

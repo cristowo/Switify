@@ -23,6 +23,11 @@ Result switifyIpcPause(void);
 Result switifyIpcNext(void);
 Result switifyIpcPrevious(void);
 Result switifyIpcSetVolume(uint32_t volumePermille);
+// The running game's own volume, permille (1000: as it is). Not in official builds.
+Result switifyIpcSetGameVolume(uint32_t volumePermille);
+Result switifyIpcGetGameVolume(uint32_t* volumePermille);
+// The app's saved session, taken over by the service (play: carry on playing).
+Result switifyIpcAdoptSession(bool play);
 Result switifyIpcSeek(uint32_t positionMs);
 Result switifyIpcSetShuffle(bool enabled);
 Result switifyIpcSetRepeatMode(SwitifyRepeatMode mode);

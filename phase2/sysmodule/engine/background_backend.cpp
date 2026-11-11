@@ -1,3 +1,4 @@
+#include "game_volume.hpp"
 #include "background_backend.hpp"
 
 #include "NXConsoleLog.h"
@@ -167,6 +168,11 @@ void BackgroundBackend::process(const ControlMessage& message) {
       result = SwitifyControlResult_Ok;
       break;
     }
+    case SwitifyIpcCommand_AdoptSession:
+      // The app closed: what it played, from where it was.
+      if (ready && !engine.adoptPlaybackSession(message.value != 0))
+        result = SwitifyControlResult_BackendUnavailable;
+      break;
     case SwitifyIpcCommand_PlayPause:
       if (ready) engine.playPause();
       break;
@@ -1053,6 +1059,8 @@ void BackgroundBackend::run() {
            ++processed)
         process(message);
       pollPendingReload();
+      game_volume::apply();
+      dealer.tick();
 
       const auto now = std::chrono::steady_clock::now();
       if (now >= nextSnapshot) {

@@ -68,6 +68,20 @@ Result switifyIpcSetVolume(uint32_t volumePermille) {
   return dispatchU32(SwitifyIpcCommand_SetVolume, volumePermille);
 }
 
+Result switifyIpcSetGameVolume(uint32_t volumePermille) {
+  return dispatchU32(SwitifyIpcCommand_SetGameVolume, volumePermille);
+}
+
+Result switifyIpcGetGameVolume(uint32_t* volumePermille) {
+  if (!volumePermille) return MAKERESULT(Module_Libnx, LibnxError_BadInput);
+  return serviceDispatchOut(&g_switifyService, SwitifyIpcCommand_GetGameVolume,
+                            *volumePermille);
+}
+
+Result switifyIpcAdoptSession(bool play) {
+  return dispatchU32(SwitifyIpcCommand_AdoptSession, play ? 1u : 0u);
+}
+
 Result switifyIpcSeek(uint32_t positionMs) {
   return dispatchU32(SwitifyIpcCommand_Seek, positionMs);
 }

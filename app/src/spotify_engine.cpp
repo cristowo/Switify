@@ -605,6 +605,14 @@ std::string partnerArtists(const Json& item) {
   return joined;
 }
 
+// Subtrees that describe someone else, not the item: a playlist's owner
+// carries the owner's avatar, which won over playlists whose own cover has no
+// width (every playlist of yours showed your profile picture).
+bool isPersonKey(const std::string& key) {
+  return key == "ownerV2" || key == "owner" || key == "user" || key == "avatar" ||
+         key == "creator" || key == "profile" || key == "madeFor";
+}
+
 void findPartnerImage(const Json& value, std::string& best,
                       int& bestDistance,
                       int targetWidth = DefaultArtworkWidth, int depth = 0) {
@@ -621,8 +629,9 @@ void findPartnerImage(const Json& value, std::string& best,
       }
     }
     for (auto child = value.begin(); child != value.end(); ++child)
-      findPartnerImage(child.value(), best, bestDistance, targetWidth,
-                       depth + 1);
+      if (!isPersonKey(child.key()))
+        findPartnerImage(child.value(), best, bestDistance, targetWidth,
+                         depth + 1);
   } else if (value.is_array()) {
     for (const auto& child : value)
       findPartnerImage(child, best, bestDistance, targetWidth, depth + 1);
@@ -635,10 +644,13 @@ std::string partnerImage(const Json& item,
   int bestDistance = std::numeric_limits<int>::max();
   // Album art is the most useful track image. Search it first and retain it
   // when available instead of accidentally selecting an artist avatar.
-  for (const char* key : {"albumOfTrack", "album"}) {
+  // A playlist's / album's / show's own picture next, by the names the
+  // partner API uses for it.
+  for (const char* key : {"albumOfTrack", "album", "images", "coverArt", "image", "imageV2", "visuals"}) {
     const auto album = item.find(key);
     if (album != item.end())
       findPartnerImage(*album, best, bestDistance, targetWidth);
+    if (!best.empty()) break;
   }
   if (best.empty())
     findPartnerImage(item, best, bestDistance, targetWidth);
@@ -1370,6 +1382,125 @@ std::vector<SpotifyEngine::Track> SpotifyEngine::currentQueue() {
   if (first >= activeQueue.size()) return {};
   return {activeQueue.begin() + static_cast<std::ptrdiff_t>(first),
           activeQueue.end()};
+}
+
+std::string SpotifyEngine::connectDeviceId() {
+  return ctx ? ctx->config.deviceId : std::string();
+}
+
+std::string SpotifyEngine::connectAccessToken() { return login5AccessToken(); }
+
+uint64_t SpotifyEngine::spotifyTimeMs() {
+  if (ctx && ctx->timeProvider) {
+    const unsigned long long synced = ctx->timeProvider->getSyncedTimestamp();
+    if (synced > 1'500'000'000'000ULL) return synced;
+  }
+  return static_cast<uint64_t>(std::time(nullptr)) * 1000ULL;
+}
+
+int SpotifyEngine::putConnectState(const std::string& connectionId,
+                                   const std::vector<uint8_t>& body) {
+  const std::string deviceId = connectDeviceId();
+  const std::string token = login5AccessToken();
+  const std::string clientToken = spotifyClientToken();
+  if (deviceId.empty() || token.empty() || connectionId.empty()) return 0;
+  WebHeaders headers = {
+      {"Authorization", "Bearer " + token},
+      {"Content-Type", "application/x-protobuf"},
+      {"Accept", "application/x-protobuf"},
+      {"X-Spotify-Connection-Id", connectionId},
+      {"User-Agent", "Spotify/127700358 Linux/0 (Switify)"}};
+  if (!clientToken.empty()) headers.push_back({"Client-Token", clientToken});
+  try {
+    const auto response = webRequest(
+        "https://spclient.wg.spotify.com/connect-state/v1/devices/" + deviceId,
+        "PUT", body, headers);
+    return response.statusCode;
+  } catch (const std::exception& error) {
+    nxlog::pushf("Connect state PUT failed: %s", error.what());
+    return 0;
+  }
+}
+
+void SpotifyEngine::playContext(const std::string& contextUri,
+                                const std::string& trackUri,
+                                uint32_t positionMs, bool paused) {
+  Collection collection;
+  bool resolvable = true;
+  auto after = [&](const char* prefix) {
+    const size_t at = contextUri.rfind(prefix);
+    return at == std::string::npos ? std::string() : contextUri.substr(at + std::strlen(prefix));
+  };
+  if (contextUri.rfind("spotify:playlist:", 0) == 0) {
+    collection.kind = Collection::Kind::PLAYLIST;
+    collection.id = after("spotify:playlist:");
+  } else if (contextUri.rfind("spotify:album:", 0) == 0) {
+    collection.kind = Collection::Kind::ALBUM;
+    collection.id = after("spotify:album:");
+  } else if (contextUri.rfind("spotify:artist:", 0) == 0) {
+    collection.kind = Collection::Kind::ARTIST;
+    collection.id = after("spotify:artist:");
+  } else if (contextUri.find(":collection") != std::string::npos) {
+    collection.kind = Collection::Kind::LIKED;
+  } else {
+    resolvable = false;
+  }
+  collection.uri = contextUri;
+  Track single;
+  single.uri = trackUri;
+  single.id = idFromUri(trackUri);
+  auto start = [this, positionMs, paused](std::vector<Track> tracks, size_t index,
+                                          const std::string& source) {
+    if (tracks.empty()) return;
+    playTracks(std::move(tracks), index, source, positionMs);
+    if (paused) playPause();
+  };
+  if (!resolvable) {
+    nxlog::pushf("Connect: playing %s on its own", trackUri.c_str());
+    if (!trackUri.empty()) start({single}, 0, "Spotify Connect");
+    return;
+  }
+  fetchPlaylistTrackPage(collection, 0, 100,
+      [start, single, trackUri, contextUri](Result<TrackPage> result) {
+        std::vector<Track> tracks;
+        if (result.ok()) tracks = std::move(result.value.tracks);
+        size_t index = 0;
+        bool found = trackUri.empty();
+        for (size_t i = 0; i < tracks.size() && !found; ++i)
+          if (tracks[i].uri == trackUri) {
+            index = i;
+            found = true;
+          }
+        if (!found && !single.uri.empty()) {  // (further in than the first page, or not in it at all)
+          tracks.insert(tracks.begin(), single);
+          index = 0;
+        }
+        nxlog::pushf("Connect: playing %s from track %u of %u", contextUri.c_str(),
+                     static_cast<unsigned>(index + 1), static_cast<unsigned>(tracks.size()));
+        start(std::move(tracks), index, "Spotify Connect");
+      });
+}
+
+bool SpotifyEngine::adoptPlaybackSession(bool play) {
+  if (currentState != State::Ready || !handler) return false;
+  if (!pausedState) {  // (what this one played stops: the other one played on)
+    pausedState = true;
+    handler->setPause(true);
+  }
+  {
+    std::lock_guard<std::mutex> lock(dataMutex);
+    activePlaylist.clear();
+    activePlaylistHasCurrent = false;
+    activeQueue.clear();
+    activeQueueHasCurrent = false;
+  }
+  if (!restorePlaybackSession()) {
+    nxlog::push("Session hand-over: nothing saved to play on from");
+    return false;
+  }
+  nxlog::push(play ? "Session hand-over: playing on" : "Session hand-over: paused where it was");
+  if (play) playPause();
+  return true;
 }
 
 void SpotifyEngine::playPause() {
@@ -3846,7 +3977,11 @@ void SpotifyEngine::run() {
     });
 
     setState(State::Ready, "Connected");
-    restorePlaybackSession();
+    if (restorePlaybackSession() && playRestoredSession) {
+      playRestoredSession = false;
+      nxlog::push("Playing on from the background service's session");
+      playPause();
+    }
     while (running) {
       try {
         ctx->session->handlePacket();

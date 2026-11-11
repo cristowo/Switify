@@ -1,5 +1,9 @@
 // Switify — native Spotify client for Nintendo Switch.
 
+#ifdef __SWITCH__
+#include "switify/ipc_client.h"
+#include "switify/ipc_protocol.h"
+#endif
 #include <borealis.hpp>
 #include <borealis/core/cache_helper.hpp>
 
@@ -43,6 +47,50 @@ class MainActivity : public brls::Activity {
         });
   }
 };
+
+#ifdef __SWITCH__
+// One Switify plays at a time: the background service (the overlay's, and
+// HOME's) or this app. Opening the app takes over what the service was
+// playing, where it was; closing it hands its song back to the service.
+namespace handover {
+
+bool serviceRunning() {  // (sm:AtmosphereHasService: GetService would wait for it)
+  std::uint8_t present = 0;
+  const SmServiceName name = smEncodeName(SWITIFY_IPC_SERVICE_NAME);
+  return R_SUCCEEDED(tipcDispatchInOut(smGetServiceSessionTipc(), 65100, name, present)) && (present & 1);
+}
+
+bool playing(const SwitifyIpcStatus& status) {
+  return (status.flags & SwitifyStatusFlag_HasTrack) &&
+         (status.playback_state == SwitifyPlaybackState_Playing ||
+          status.playback_state == SwitifyPlaybackState_Buffering);
+}
+
+// The service paused (its session saved, where it was): true if it was playing.
+bool takeFromService() {
+  if (!serviceRunning() || R_FAILED(switifyIpcInitialize())) return false;
+  SwitifyIpcStatus status{};
+  bool was = R_SUCCEEDED(switifyIpcGetStatus(&status)) && status.struct_size == sizeof(status) && playing(status);
+  if (was && R_SUCCEEDED(switifyIpcPause())) {
+    for (int i = 0; i < 30; ++i) {  // until it says paused (it saves as it pauses), 3 s at most
+      svcSleepThread(100'000'000ULL);
+      if (R_SUCCEEDED(switifyIpcGetStatus(&status)) && !playing(status)) break;
+    }
+    nxlog::push("Took over the background service's song");
+  }
+  switifyIpcExit();
+  return was;
+}
+
+void giveToService(bool play) {
+  if (!serviceRunning() || R_FAILED(switifyIpcInitialize())) return;
+  const Result rc = switifyIpcAdoptSession(play);
+  if (R_FAILED(rc)) nxlog::pushf("The background service didn't take the song (0x%X)", static_cast<unsigned>(rc));
+  switifyIpcExit();
+}
+
+}  // namespace handover
+#endif
 
 int main(int argc, char* argv[]) {
   brls::Logger::setLogLevel(brls::LogLevel::LOG_INFO);
@@ -104,6 +152,9 @@ int main(int argc, char* argv[]) {
   SpotifyEngine::instance().setEqualizer(
       settings.equalizerEnabled, settings.bassDb, settings.midDb,
       settings.trebleDb);
+#ifdef __SWITCH__
+  SpotifyEngine::instance().setPlayRestoredSession(handover::takeFromService());
+#endif
   SpotifyEngine::instance().start();
 
   brls::Application::pushActivity(new MainActivity());
@@ -120,7 +171,14 @@ int main(int argc, char* argv[]) {
 
   swplatform::shutdown();
   swui::shutdownRemoteImages();
-  SpotifyEngine::instance().shutdown();
+#ifdef __SWITCH__
+  const auto now = SpotifyEngine::instance().nowPlaying();
+  const bool playingNow = now.hasTrack && !now.paused;
+#endif
+  SpotifyEngine::instance().shutdown();  // (saves the session)
+#ifdef __SWITCH__
+  handover::giveToService(playingNow);
+#endif
 #ifdef __SWITCH__
   if (nxlinkSocket >= 0) nxlog::drain();
   if (nxlinkSocket >= 0) close(nxlinkSocket);

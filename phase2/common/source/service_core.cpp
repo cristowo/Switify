@@ -243,7 +243,8 @@ bool ServiceCore::isControlCommand(SwitifyIpcCommand command) {
           command <= SwitifyIpcCommand_SetAudioQuality) ||
          (command >= SwitifyIpcCommand_BrowseHome &&
           command <= SwitifyIpcCommand_BrowseQueue) ||
-         command == SwitifyIpcCommand_ReloadCurrent;
+         command == SwitifyIpcCommand_ReloadCurrent ||
+         command == SwitifyIpcCommand_AdoptSession;
 }
 
 SwitifyControlResult ServiceCore::validate(SwitifyIpcCommand command,
@@ -251,6 +252,8 @@ SwitifyControlResult ServiceCore::validate(SwitifyIpcCommand command,
   if (!isControlCommand(command))
     return SwitifyControlResult_InvalidCommand;
   if (command == SwitifyIpcCommand_SetVolume && value > 1000)
+    return SwitifyControlResult_InvalidArgument;
+  if (command == SwitifyIpcCommand_AdoptSession && value > 1)
     return SwitifyControlResult_InvalidArgument;
   if (command == SwitifyIpcCommand_SetShuffle && value > 1)
     return SwitifyControlResult_InvalidArgument;

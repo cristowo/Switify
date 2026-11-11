@@ -58,6 +58,7 @@ if (PLATFORM_SWITCH)
     list(APPEND MAIN_SRC
         ${BOREALIS_LIBRARY}/lib/platforms/switch/switch_wrapper.c
         ${CMAKE_CURRENT_SOURCE_DIR}/../targets/switch/NXAudioSink.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/../phase2/ipc-client/source/ipc_client.c
     )
 endif ()
 
@@ -67,6 +68,8 @@ set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/../targets/switch
+    ${CMAKE_CURRENT_SOURCE_DIR}/../phase2/ipc-client/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../phase2/common/include
 )
 target_compile_options(${PROJECT_NAME} PRIVATE -ffunction-sections -fdata-sections)
 target_link_libraries(${PROJECT_NAME} PRIVATE cspot borealis)
